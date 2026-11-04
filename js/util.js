@@ -52,6 +52,13 @@ export function daysBetween(a, b) {
   return Math.round((parseYmd(b) - parseYmd(a)) / 86400000);
 }
 
+// True only for "YYYY-MM-DD" naming a real calendar date (rejects 2025-13-45, 2025-02-30, 'foo').
+export function validYmd(s) {
+  if (typeof s !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const d = parseYmd(s);
+  return !isNaN(d) && ymd(d) === s;
+}
+
 // "Today" rolls over at settings.dayStartHour (default 4am) so 1am still counts as last night.
 export function logicalToday(dayStartHour = 4) {
   const now = new Date();
@@ -112,13 +119,15 @@ export function download(filename, text, type = 'text/plain') {
 }
 
 // Share a file through the Android share sheet when possible; fall back to a download.
+// Resolves true when the file was shared or downloaded, false when the user dismissed the share sheet.
 export async function shareOrDownload(filename, text, type = 'text/csv') {
   const file = new File([text], filename, { type });
   if (navigator.canShare && navigator.canShare({ files: [file] })) {
-    try { await navigator.share({ files: [file], title: filename }); return; }
-    catch (e) { if (e.name === 'AbortError') return; }
+    try { await navigator.share({ files: [file], title: filename }); return true; }
+    catch (e) { if (e.name === 'AbortError') return false; }
   }
   download(filename, text, type);
+  return true;
 }
 
 export function modal(title, body, actions = []) {

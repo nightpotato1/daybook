@@ -1,0 +1,114 @@
+/* Food log + editor. Every class is prefixed fd-; base tokens (--bg, --card, --ink, --muted, --line,
+   --accent, --accent-soft, --good, --bad, --radius) come from css/app.css. */
+
+/* day list */
+.fd-totals { display: grid; grid-template-columns: repeat(4, 1fr); text-align: center; }
+.fd-total b { display: block; font-size: 20px; }
+.fd-total small { display: block; color: var(--muted); }
+.fd-total .fd-goal { font-size: 11px; }
+.fd-actions { display: flex; gap: 8px; margin: 10px 0 4px; }
+.fd-actions .btn { flex: 1; min-height: 44px; white-space: normal; text-align: center; line-height: 1.2; padding: 6px 10px; }
+.fd-list { padding-top: 4px; padding-bottom: 4px; }
+.fd-row { display: flex; align-items: center; gap: 10px; min-height: 56px; padding: 6px 0; border-top: 1px solid var(--line); color: var(--ink); }
+.fd-row:first-child { border-top: 0; }
+.fd-thumb { width: 46px; height: 46px; border-radius: 10px; object-fit: cover; flex: none; }
+.fd-ph { display: flex; align-items: center; justify-content: center; background: var(--bg); color: var(--muted); font-size: 18px; }
+.fd-main { flex: 1; min-width: 0; }
+.fd-main div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fd-main small, .fd-num small { color: var(--muted); }
+.fd-num { text-align: right; white-space: nowrap; }
+
+/* editor: photo + AI */
+.fd-photo-row { display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+.fd-photo-row .btn { min-height: 44px; }
+.fd-photo-row .fd-camera { flex: 1 1 100%; }
+.fd-photo-row .btn:not(.fd-camera) { flex: 1 1 40%; }
+.fd-preview img { width: 100%; max-height: 260px; object-fit: cover; border-radius: 12px; margin-bottom: 8px; display: block; }
+.fd-ai-row { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; margin: 8px 0; }
+.fd-ai-row .btn { min-height: 44px; min-width: 160px; }
+.fd-count { color: var(--muted); }
+.fd-status { font-size: 13px; color: var(--muted); min-height: 1.2em; overflow-wrap: anywhere; }
+.fd-status a { text-decoration: underline; }
+.fd-note { font-size: 12.5px; color: var(--muted); margin-top: 6px; }
+.fd-note:empty { display: none; }
+.fd-spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: fd-spin .8s linear infinite; vertical-align: -2px; }
+@keyframes fd-spin { to { transform: rotate(360deg); } }
+.fd-questions { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.fd-questions:empty { display: none; }
+.fd-q { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 6px 8px; border-radius: 10px; background: var(--accent-soft); font-size: 13.5px; }
+.fd-q > span { flex: 1 1 100%; }
+
+/* chips (portion, hidden-fat, yes/no): 44px tall */
+.fd-chip {
+  min-height: 44px; padding: 0 14px; border-radius: 22px; border: 1px solid var(--line);
+  background: var(--bg); color: var(--ink); font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer; white-space: nowrap;
+}
+.fd-chip:active { background: var(--accent-soft); }
+
+/* editor: items */
+.fd-name-row { display: flex; gap: 8px; align-items: center; }
+.fd-name-row input[type=text] { flex: 1; min-width: 0; }
+.fd-items { display: flex; flex-direction: column; gap: 8px; margin: 8px 0; }
+.fd-it { border: 1px solid var(--line); border-radius: 12px; padding: 8px; }
+.fd-it-top { display: flex; gap: 6px; align-items: center; }
+.fd-it-top input { flex: 1; min-width: 0; font-weight: 600; }
+.fd-it-top .icon-btn { min-width: 44px; height: 44px; }
+.fd-src { color: var(--muted); white-space: nowrap; font-size: 11px; }
+.fd-src:empty { display: none; }
+.fd-it-nums { display: grid; grid-template-columns: 1.5fr 1fr 1fr 1fr 1fr 1fr; gap: 4px; }
+.fd-it-nums label { margin: 4px 0 0; font-size: 11px; gap: 2px; min-width: 0; }
+.fd-it-nums input { width: 100%; padding: 6px 2px; min-height: var(--tap, 44px); text-align: center; }
+.fd-it-nums label:first-child input { text-align: left; padding-left: 6px; }
+.fd-it-nums input[type=number]::-webkit-inner-spin-button, .fd-it-nums input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.fd-it-nums input[type=number] { -moz-appearance: textfield; appearance: textfield; }
+.fd-it-chips, .fd-hidden { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
+.fd-it-chips .fd-chip { flex: 1; min-width: 56px; padding: 0 6px; }
+.fd-hidden { margin: 10px 0 4px; }
+.fd-hidden .fd-chip { font-weight: 500; }
+.fd-item-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
+.fd-item-actions .btn { min-height: 44px; }
+.fd-total-line { margin: 10px 0; font-size: 15px; }
+.fd-range { color: var(--muted); font-size: 13px; }
+.fd-save-row { display: flex; gap: 8px; align-items: center; margin-top: 4px; }
+.fd-save-row .btn { min-height: 48px; }
+
+/* past foods + usual meals */
+.fd-lib > summary { list-style: none; display: flex; align-items: center; min-height: 44px; cursor: pointer; font-weight: 650; }
+.fd-lib > summary::-webkit-details-marker { display: none; }
+details.card.fd-lib > summary::after { content: '▾'; color: var(--muted); margin-left: auto; transition: transform .15s; }
+.fd-lib:not([open]) > summary::after { transform: rotate(-90deg); }
+.fd-lib input[type=search] { width: 100%; margin-top: 8px; }
+.fd-lib-results { display: flex; flex-direction: column; margin-top: 6px; }
+.fd-hit {
+  display: flex; justify-content: space-between; align-items: center; gap: 8px; min-height: 48px; text-align: left;
+  border: 0; border-top: 1px solid var(--line); background: transparent; color: var(--ink); font: inherit; padding: 6px 2px; cursor: pointer;
+}
+.fd-hit:first-child { border-top: 0; }
+.fd-hit > small { color: var(--muted); white-space: nowrap; }
+.fd-hit:active { background: var(--accent-soft); }
+.fd-qty { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-height: 48px; padding: 6px 2px; border-top: 1px solid var(--line); background: var(--accent-soft); border-radius: 10px; }
+.fd-qty > .grow { flex: 1 1 100%; font-weight: 600; }
+.fd-qty b { min-width: 64px; text-align: center; }
+.fd-qty small { color: var(--muted); flex: 1; }
+.fd-qty .btn { min-height: 44px; }
+.fd-step { width: 44px; height: 44px; border-radius: 12px; border: 1px solid var(--line); background: var(--card); color: var(--ink); font-size: 22px; cursor: pointer; padding: 0; }
+.fd-step:active { background: var(--accent); color: var(--accent-ink); }
+.fd-meals { display: flex; flex-direction: column; margin-top: 4px; }
+.fd-meal { display: flex; align-items: center; gap: 4px; border-top: 1px solid var(--line); }
+.fd-meal:first-child { border-top: 0; }
+.fd-meal .fd-hit { border-top: 0; }
+.fd-meal .icon-btn { min-width: 44px; height: 44px; color: var(--muted); }
+
+/* barcode scanner overlay */
+.fd-scan-wrap { position: fixed; inset: 0; z-index: 55; background: rgba(0,0,0,.75); display: flex; align-items: center; justify-content: center; padding: 16px; }
+.fd-scan { width: 100%; max-width: 420px; background: var(--card); border-radius: 16px; padding: 12px; }
+.fd-scan-video { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 12px; background: #000; display: block; }
+.fd-scan-hint { text-align: center; color: var(--muted); font-size: 13px; margin: 8px 0; }
+.fd-scan-actions { display: flex; gap: 8px; }
+.fd-scan-actions .btn { flex: 1; min-height: 44px; }
+
+@media (max-width: 400px) {
+  .fd-it-nums { grid-template-columns: repeat(3, 1fr); }
+  .fd-it-nums label:first-child { grid-column: 1 / span 2; }
+  .fd-it-nums label:first-child input { text-align: left; }
+}

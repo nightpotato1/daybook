@@ -3,14 +3,22 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://generativelanguage.googleapis.com https://api.anthropic.com https://oauth2.googleapis.com https://health.googleapis.com https://world.openfoodfacts.org; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; form-action https://accounts.google.com; base-uri 'none'; object-src 'none'">
   <meta name="theme-color" content="#14161c" media="(prefers-color-scheme: dark)">
   <meta name="theme-color" content="#f6f5f1" media="(prefers-color-scheme: light)">
+  <meta name="description" content="Daybook: a private daily tracker that lives in this phone's browser.">
   <title>Daybook</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
   <link rel="stylesheet" href="css/app.css">
+  <link rel="stylesheet" href="css/shell.css">
+  <link rel="stylesheet" href="css/food.css">
+  <link rel="stylesheet" href="css/charts.css">
+  <link rel="stylesheet" href="css/settings.css">
   <script type="module" src="js/main.js"></script>
 </head>
-<body></body>
+<body>
+  <noscript>Daybook needs JavaScript turned on.</noscript>
+</body>
 </html>

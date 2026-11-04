@@ -1,0 +1,77 @@
+/* Settings screen (owner H). All classes prefixed st-; base .card/.btn/.row/.btn-grid come from app.css. */
+
+.st-card .wide { width: 100%; margin-top: 10px; }
+
+/* ---- What you track ---- */
+.st-sec { display: flex; align-items: baseline; gap: 4px; margin: 16px 0 2px; }
+.st-sec span { text-transform: none; letter-spacing: 0; font-weight: 400; }
+.st-row { padding: 6px 0 8px; border-top: 1px solid var(--line); }
+.st-row.st-off .st-name { color: var(--muted); }
+.st-row.st-off .st-name-text { text-decoration: line-through; }
+.st-row.st-dragging { opacity: .75; background: var(--accent-soft); border-radius: 10px; position: relative; z-index: 2; }
+.st-row-main { display: flex; align-items: center; gap: 4px; }
+.st-row-tools { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 4px; }
+.st-name { flex: 1; min-width: 0; font-size: 14.5px; line-height: 1.25; }
+.st-name small { display: block; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.st-handle {
+  width: 44px; height: 44px; flex: none; border: 0; background: transparent; color: var(--muted);
+  font-size: 18px; letter-spacing: -4px; border-radius: 10px; cursor: grab;
+  touch-action: none; user-select: none; -webkit-user-select: none;
+}
+.st-handle:active { cursor: grabbing; background: var(--accent-soft); }
+.st-icon {
+  min-width: 44px; height: 44px; flex: none; border: 0; background: transparent; color: var(--ink);
+  font-size: 19px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
+}
+.st-icon:active { background: var(--accent-soft); }
+.st-switch {
+  min-width: 48px; height: 44px; padding: 0 12px; border-radius: 22px; border: 1px solid var(--line);
+  background: var(--bg); color: var(--ink); font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; flex: none;
+}
+.st-switch.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.st-seg { display: flex; background: var(--bg); border: 1px solid var(--line); border-radius: 11px; padding: 0; }
+.st-seg button {
+  min-width: 52px; height: 44px; border: 0; background: transparent; color: var(--muted);
+  font: inherit; font-size: 12.5px; font-weight: 600; padding: 0 8px; border-radius: 9px; cursor: pointer;
+}
+.st-seg button.on { background: var(--accent-soft); color: var(--accent); }
+/* Tools row: 3 x 44px icons + segment (3 x 52px + 2px border) + 8px gap = 298px in the 315px card at 375px wide. */
+.st-order { display: flex; gap: 0; flex: none; }
+
+/* ---- edit modal ---- */
+.st-form label { margin: 6px 0; }
+.st-form input, .st-form select { width: 100%; }
+.st-grid3 { display: grid; grid-template-columns: 1fr 1fr 1.4fr; gap: 8px; }
+.st-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.st-grid2 input, .st-grid3 input, .st-grid3 select { width: 100%; min-width: 0; }
+
+/* ---- AI / health / reminders ---- */
+.st-between { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.st-status-line { display: block; margin: 6px 0 0; word-break: break-word; line-height: 1.35; }
+.st-disc { border: 1px solid var(--line); border-radius: 10px; padding: 0 12px; margin: 10px 0; }
+.st-disc > summary { list-style: none; cursor: pointer; font-weight: 600; font-size: 13.5px; min-height: 44px; display: flex; align-items: center; justify-content: space-between; }
+.st-disc > summary::-webkit-details-marker { display: none; }
+.st-disc > summary::after { content: '▾'; color: var(--muted); transition: transform .15s; }
+.st-disc:not([open]) > summary::after { transform: rotate(-90deg); }
+.st-disc[open] { padding-bottom: 8px; }
+/* Folded sections (Automatic, Off) in What you track */
+.st-fold { margin: 14px 0 0; }
+.st-fold > summary > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-fold-hint { font-weight: 400; }
+.st-fold[open] { padding-bottom: 4px; }
+.st-fold .st-row:first-child { border-top: 0; }
+.st-ol { padding-left: 18px; margin: 4px 0 8px; }
+.st-ol li { margin: 4px 0; }
+.st-card input[type=time] { width: 100%; }
+.st-card textarea { width: 100%; }
+
+/* ---- Your data ---- */
+.st-statusbox { background: var(--bg); border-radius: 10px; padding: 8px 10px; margin: 8px 0; font-size: 13px; }
+.st-stat { display: flex; justify-content: space-between; gap: 10px; padding: 3px 0; }
+.st-stat span { flex: none; }
+.st-stat b { font-weight: 600; text-align: right; min-width: 0; word-break: break-word; }
+
+/* 300px card at 360px wide: 132 + (3 x 46 + 2) + 8 = 280px; icons stay 44px. */
+@media (max-width: 360px) {
+  .st-seg button { min-width: 46px; padding: 0 4px; }
+}

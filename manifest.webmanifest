@@ -1,7 +1,7 @@
 {
   "name": "Daybook",
   "short_name": "Daybook",
-  "description": "Private daily tracker: mood, habits, sleep, food and what goes with what.",
+  "description": "Private daily tracker: mood, habits, sleep, food and what goes with what. Everything stays on this phone.",
   "start_url": "./#/today",
   "scope": "./",
   "display": "standalone",
@@ -9,12 +9,13 @@
   "theme_color": "#14161c",
   "orientation": "portrait",
   "icons": [
-    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
-    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-192-maskable.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "icons/icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ],
   "shortcuts": [
-    { "name": "Photo a meal", "url": "./#/food//photo" },
-    { "name": "Today", "url": "./#/today" }
+    { "name": "Photo a meal", "short_name": "Photo", "url": "./#/food/_/photo", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Today", "short_name": "Today", "url": "./#/today", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] }
   ]
 }
