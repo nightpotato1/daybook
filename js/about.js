@@ -53,8 +53,9 @@ export async function renderAbout(root) {
       p('The only protection against all four is a backup file somewhere else.')),
 
     section('Backups and restoring',
-      p('Settings → Your data → Back up makes one JSON file with every day, every food entry, the meal photos (small), your field list and your goals. Keys are left out. Send it to Google Drive from the share sheet, or keep it in Downloads and copy it to the PC now and then.'),
-      p('The banner at the top appears when the last backup is more than a week old or 30 new records have piled up. One tap makes a fresh file.'),
+      p('Automatic backup (Settings → Automatic backup) copies every change to a private GitHub repository within about 15 seconds, or as soon as the phone is back online. Each day is its own file and each change is a commit, so the repository is also a history. Keys and tokens are never sent. Setting it up once needs a personal access token that can only touch that one repository; the steps are on the card.'),
+      p('Restore from GitHub (same card) pulls everything back onto a new phone or after Chrome was cleared, and turns automatic backup on again.'),
+      p('Settings → Your data → Back up now still makes a single JSON file (with photos) you can send anywhere. The banner at the top only appears when automatic backup is off, failing, or has been stuck for an hour.'),
       p(h('b', {}, 'To restore: '), 'open the file on the phone (Drive, USB, or Downloads), then Settings → Your data → Import file. Days in the file are merged with what is on the phone; the file wins for the same date. Nothing is deleted by an import.'),
       p('Daily CSV and Food CSV exports are for spreadsheets. Only the JSON file is a full backup.')),
 

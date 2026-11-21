@@ -2,6 +2,7 @@
 import { h, modal, toast, confirmDialog, shareOrDownload, download, ymd } from './util.js';
 import { loadMetrics, saveMetrics, loadSettings, saveSettings, GROUPS, TYPES, slug, SYSTEM_IDS, tierOf } from './metrics.js';
 import { dailyCSV, foodCSV, importBackup, importDailyCSV, wipeAll, backupNow, backupStatus } from './io.js';
+import { syncStatus, enableBackup, disableBackup, restoreBackup, push as pushBackup, onSyncChange } from './sync.js';
 import * as AI from './ai.js';
 import { connectHealth, syncHealth, healthConnected, disconnectHealth, redirectUri } from './health.js';
 import { requestPersist, db } from './db.js';
@@ -479,6 +480,66 @@ export async function renderSettings(root) {
     } catch (err) { toast(`Import failed: ${err.message}`, 6000); }
     e.target.value = '';
   } });
+  // ================= Automatic backup =================
+  const DEFAULT_REPO = 'nightpotato1/daybook-data';
+  const bk = settings.backup || {};
+  const syncLine = h('div', { class: 'st-statusbox' });
+  const repoIn = h('input', { type: 'text', value: bk.repo || DEFAULT_REPO, placeholder: 'owner/repository', autocapitalize: 'off', autocorrect: 'off', spellcheck: false });
+  const tokenIn = h('input', { type: 'password', value: '', placeholder: bk.token ? 'saved on this phone (paste a new one to replace)' : 'github_pat_…', autocomplete: 'off' });
+  const syncMsg = h('small', { class: 'muted' });
+  const paintSync = async () => {
+    if (!syncLine.isConnected && unsub) { unsub(); return; } // Settings was re-rendered or left
+    let st = null;
+    try { st = await syncStatus(); } catch (e) { st = null; }
+    const line = (k, v) => h('div', { class: 'st-stat' }, h('span', { class: 'muted' }, k), h('b', {}, v));
+    if (!st) { syncLine.replaceChildren(h('small', { class: 'muted' }, 'Status unavailable')); return; }
+    syncLine.replaceChildren(...[
+      line('Automatic backup', st.enabled ? `on → ${st.repo}` : 'off'),
+      st.enabled ? line('Last backup', st.lastPushAt ? fmtDate(st.lastPushAt) : 'none yet') : null,
+      st.enabled ? line('Waiting to send', st.pending ? `${st.pending} change${st.pending === 1 ? '' : 's'}${st.online ? '' : ' (offline)'}` : 'nothing') : null,
+      st.lastError ? h('div', { class: 'st-stat' }, h('span', { class: 'muted' }, 'Problem'), h('b', { class: 'bad' }, st.lastError)) : null].filter(Boolean));
+  };
+  let unsub = null;
+  paintSync();
+  unsub = onSyncChange(paintSync);
+  const busy = (btn, fn) => async () => { btn.disabled = true; syncMsg.textContent = ''; try { await fn(); } catch (e) { syncMsg.textContent = e.message || String(e); } finally { btn.disabled = false; paintSync(); } };
+  const enableBtn = h('button', { class: 'btn primary' }, bk.enabled ? 'Save changes' : 'Turn on');
+  enableBtn.onclick = busy(enableBtn, async () => {
+    const token = tokenIn.value.trim() || bk.token;
+    const r = await enableBackup(repoIn.value, token);
+    settings.backup = (await loadSettings()).backup;
+    tokenIn.value = '';
+    toast(`Automatic backup on: ${r.repo}. Sending everything now.`, 4000);
+  });
+  const pushBtn = h('button', { class: 'btn' }, 'Send now');
+  pushBtn.onclick = busy(pushBtn, async () => { await pushBackup(); const st = await syncStatus(); if (st.lastError) throw new Error(st.lastError); toast('Backup is up to date'); });
+  const restoreBtn = h('button', { class: 'btn' }, 'Restore from GitHub');
+  restoreBtn.onclick = busy(restoreBtn, async () => {
+    const token = tokenIn.value.trim() || bk.token;
+    if (!token) throw new Error('Paste the token first');
+    if (!(await confirmDialog('Pull the backup from GitHub into this phone? Existing entries here are kept; the backup wins where both have the same day.', 'Restore'))) return;
+    const r = await restoreBackup(repoIn.value, token, (t) => { syncMsg.textContent = t; });
+    toast(`Restored ${r.days} days, ${r.food} food entries, ${r.photos} photos`, 5000);
+    renderSettings(root);
+  });
+  const offBtn = h('button', { class: 'btn danger' }, 'Turn off');
+  offBtn.onclick = busy(offBtn, async () => { if (await confirmDialog('Stop backing up automatically? Nothing is deleted from GitHub.', 'Turn off')) { await disableBackup(); renderSettings(root); } });
+  const syncBox = h('section', { class: 'card st-card' },
+    h('h3', {}, 'Automatic backup'),
+    h('p', { class: 'small muted' }, 'Every change is copied to a private GitHub repository within about 15 seconds (or as soon as the phone is online again). Losing the phone or clearing Chrome then costs nothing: Restore pulls it all back. The repository keeps a history of every day as well.'),
+    syncLine,
+    h('details', { class: 'st-fold', open: !bk.enabled },
+      h('summary', {}, bk.enabled ? 'Change repository or token' : 'Set up (once)'),
+      h('ol', { class: 'small' },
+        h('li', {}, 'The private repository ', h('code', {}, DEFAULT_REPO), ' already exists.'),
+        h('li', {}, 'Open ', h('a', { href: 'https://github.com/settings/personal-access-tokens/new', target: '_blank', rel: 'noopener' }, 'github.com → new fine-grained token'),
+          ': name it Daybook, expiry 1 year, Repository access → Only select repositories → daybook-data, Permissions → Repository → Contents → Read and write. Generate and copy it.'),
+        h('li', {}, 'Paste it below and press Turn on. The token stays on this phone and is left out of backups. When it expires in a year the app says so here.')),
+      h('label', {}, 'Repository', repoIn),
+      h('label', {}, 'Token', tokenIn)),
+    h('div', { class: 'row' }, enableBtn, bk.enabled ? pushBtn : null, restoreBtn, bk.enabled ? offBtn : null),
+    syncMsg);
+
   const dataBox = h('section', { class: 'card st-card' },
     h('h3', {}, 'Your data'),
     status,
@@ -497,6 +558,6 @@ export async function renderSettings(root) {
 
   root.replaceChildren(
     h('h2', { class: 'page-title' }, 'Settings'),
-    dataBox, trackBox, aiBox, fbBox, remBox, dayBox,
+    syncBox, dataBox, trackBox, aiBox, fbBox, remBox, dayBox,
     h('p', { class: 'small muted center' }, 'Daybook · everything is stored on this phone'));
 }

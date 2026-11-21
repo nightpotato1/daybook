@@ -6,7 +6,8 @@ import * as U from './util.js';
 import { h, $, toast, logicalToday, prettyDate } from './util.js';
 import { getMeta, setMeta, requestPersist } from './db.js';
 import { loadSettings } from './metrics.js';
-import { backupNow, backupStatus } from './io.js';
+import { backupStatus } from './io.js';
+import { startSync, syncStatus, onSyncChange, push as pushBackup } from './sync.js';
 import { renderToday } from './today.js';
 import { renderFood } from './food.js';
 import { renderTrends } from './trends.js';
@@ -90,8 +91,15 @@ const state = { introSeen: true, status: null, persisted: null, updated: false }
 let bannersEl;
 
 function needsBackup(st) {
-  if (!st || (st.days || 0) + (st.food || 0) === 0) return false;
-  const WEEK = 7 * 86400000;
+  const sy = state.sync;
+  if (sy && sy.enabled) {
+    // automatic backup is on: only nag when it is failing or has been stuck for an hour
+    if (sy.lastError) return true;
+    if (!sy.pending) return false;
+    const since = sy.lastPushAt ? Date.now() - new Date(sy.lastPushAt).getTime() : Infinity;
+    return since > 3600000;
+  }
+  if (!st) return false;
   if (st.newSinceBackup > 30) return true;
   if (!st.lastBackupAt) return (st.days || 0) >= 7;
   const age = Date.now() - new Date(st.lastBackupAt).getTime();
@@ -105,6 +113,7 @@ function refreshStatus(force = false) {
   if (statusPromise && !force) return statusPromise;
   statusPromise = (async () => {
     try { state.status = await backupStatus(); } catch (e) { console.warn('backupStatus', e); state.status = null; }
+    try { state.sync = await syncStatus(); } catch (e) { console.warn('syncStatus', e); state.sync = null; }
     if (state.status && typeof state.status.persisted === 'boolean') state.persisted = state.status.persisted;
     else if (navigator.storage && navigator.storage.persisted) {
       try { state.persisted = await navigator.storage.persisted(); } catch { state.persisted = null; }
@@ -137,41 +146,35 @@ function introCard() {
     try { await setMeta('seenIntro', Date.now()); } catch (e) { console.warn(e); }
   };
   return h('section', { class: 'card sh-intro' },
-    h('h3', {}, 'Before you type anything'),
-    h('p', {}, 'Everything you type is saved in this phone’s browser only. The web address is just the app: no account, no server.'),
-    h('p', {}, 'Anyone else opening the link gets their own empty copy and cannot see or change yours. The copy on the PC is separate too.'),
-    h('p', {}, 'Clearing Chrome’s site data or uninstalling erases it, so back up from Settings now and then.'),
-    h('p', {}, 'Only a food photo (and the food text with it) ever leaves the phone, and only when you press Estimate.'),
-    h('p', { class: 'small muted' },
-      `Your data is held by: ${browserName()}${standalone ? ' (installed app)' : ''}.`,
-      standalone ? null : ' Open this in Chrome and install it so your data is in one place.'),
+    h('h3', {}, 'Where your entries go'),
+    h('p', {}, 'Saved in this phone’s browser storage. The link itself holds nothing: no account, no server, and nobody else can see or change your log.'),
+    h('p', {}, 'Turn on automatic backup so a lost phone or a cleared browser loses nothing. ',
+      h('a', { href: '#/about' }, 'Details')),
+    h('p', { class: 'small muted' }, `Held by: ${browserName()}${standalone ? ' (installed app)' : ''}.`, standalone ? null : ' Install it so your data lives in one place.'),
     h('div', { class: 'sh-actions' },
-      standalone ? null : h('button', { class: 'btn primary', onclick: install }, 'Install'),
-      h('button', { class: 'btn', onclick: go('#/settings') }, 'Import your history'),
-      h('button', { class: 'btn', onclick: go('#/about') }, 'How this works'),
+      h('button', { class: 'btn primary', onclick: go('#/settings') }, 'Set up automatic backup'),
+      standalone ? null : h('button', { class: 'btn', onclick: install }, 'Install'),
+      h('button', { class: 'btn', onclick: go('#/settings') }, 'Import history'),
       h('button', { class: 'btn', onclick: gotIt }, 'Got it')));
 }
 
 function backupBanner() {
   const st = state.status;
+  const sy = state.sync;
+  if (sy && sy.enabled) {
+    const btn = h('button', { class: 'btn primary', onclick: async () => { btn.disabled = true; try { await pushBackup(); await refreshStatus(true); } finally { btn.disabled = false; } } }, 'Retry now');
+    return h('section', { class: 'card sh-backup' },
+      h('div', { class: 'grow' },
+        h('div', {}, h('b', {}, `${sy.pending} change${sy.pending === 1 ? '' : 's'} not backed up yet.`), sy.online ? '' : ' Phone is offline.'),
+        h('div', { class: 'small muted' }, sy.lastError || (sy.lastPushAt ? `Last backup ${fmtWhen(sy.lastPushAt)}.` : 'No backup has gone through yet.'))),
+      btn);
+  }
   const prot = state.persisted == null ? 'unknown' : state.persisted ? 'yes' : 'no';
-  const btn = h('button', { class: 'btn primary', onclick: async () => {
-    btn.disabled = true;
-    try {
-      // false = the share sheet was dismissed; backupNow() then leaves lastBackupAt alone
-      const ok = await backupNow();
-      toast(ok ? 'Backup made. Send it to Drive or keep it in Downloads.' : 'Backup cancelled, nothing was saved.', 3500);
-      await refreshStatus(true);
-    } catch (e) {
-      console.error(e);
-      toast('Backup failed: ' + (e.message || e), 4000);
-    } finally { btn.disabled = false; }
-  } }, 'Back up now');
   return h('section', { class: 'card sh-backup' },
     h('div', { class: 'grow' },
       h('div', {}, 'Stored only on this phone. ', h('b', {}, `Last backup: ${fmtWhen(st.lastBackupAt)}.`)),
       h('div', { class: 'small muted' }, `Protected from automatic clearing: ${prot}. `, h('a', { href: '#/about' }, 'Why?'))),
-    btn);
+    h('button', { class: 'btn primary', onclick: () => { location.hash = '#/settings'; } }, 'Set up automatic backup'));
 }
 
 function updateBanner() {
@@ -265,6 +268,7 @@ async function boot() {
   try { state.introSeen = (await getMeta('seenIntro', null)) != null; } catch { state.introSeen = false; }
   await route(); // route() ends with refreshStatus(), which also draws the banners
   await refreshStatus();
+  try { await startSync(); onSyncChange(() => refreshStatus(true)); } catch (e) { console.warn('sync', e); }
   if (state.status && state.status.days > 0) requestPersist().then(() => refreshStatus(true));
 }
 

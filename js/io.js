@@ -84,6 +84,7 @@ export async function backupJSON({ includePhotos = true } = {}) {
   const settings = await loadSettings();
   settings.ai = { ...settings.ai, geminiKey: '', claudeKey: '' };
   settings.health = { ...settings.health, clientSecret: '', accessToken: '', refreshToken: '', expiresAt: 0 };
+  settings.backup = { ...(settings.backup || {}), token: '' };
   const [metrics, days, food] = await Promise.all([loadMetrics(), db.all('days'), db.all('food')]);
   const photos = [];
   if (includePhotos) {

@@ -6,7 +6,7 @@ Live: https://nightpotato1.github.io/daybook/
 
 ## Where the data lives
 
-Everything you type is saved in this phone's browser storage only. The web address is just the app: no account, no server. Anyone else opening the link gets their own empty copy and cannot see or change yours; the copy on a PC is separate too. Each browser keeps its own copy (Samsung Internet and Chrome would hold two different logs), so open it in Chrome and install it (menu → Add to Home screen). Clearing Chrome's site data or uninstalling erases it, so back up from Settings now and then. Only a food photo (and the food text with it) ever leaves the phone, and only when you press Estimate.
+Everything you type is saved in this phone's browser storage only. The web address is just the app: no account, no server. Anyone else opening the link gets their own empty copy and cannot see or change yours; the copy on a PC is separate too. Each browser keeps its own copy (Samsung Internet and Chrome would hold two different logs), so open it in Chrome and install it (menu → Add to Home screen). Clearing Chrome's site data or uninstalling erases the local copy, so turn on Settings → Automatic backup: every change goes to your own private GitHub repository within seconds, and Restore pulls it back. Only a food photo (and the food text with it) ever leaves the phone, and only when you press Estimate.
 
 ## Importing your history
 

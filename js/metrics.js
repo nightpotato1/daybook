@@ -94,6 +94,7 @@ export const DEFAULT_SETTINGS = {
   kcalGoal: 0,
   proteinGoal: 0,
   reminderTime: '21:30',
+  backup: { provider: 'github', repo: '', token: '', branch: 'main', enabled: false },
   goalsText: '', // the user's life goals, free text, shown on Insights
 };
 

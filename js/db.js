@@ -83,18 +83,30 @@ function putAll(store, vals) {
   for (const v of vals) store.put(v);
 }
 
+// Change listeners (used by sync.js for automatic backup). Events: {store, key, date?, bulk?, type}.
+const changeListeners = new Set();
+export function onChange(fn) { changeListeners.add(fn); return () => changeListeners.delete(fn); }
+function notify(ev) { for (const f of changeListeners) { try { f(ev); } catch (e) { console.warn('onChange', e); } } }
+const KEY = { days: 'date', food: 'id', photos: 'id', meta: 'key' };
+const keyOf = (store, val) => (val && KEY[store] ? val[KEY[store]] : undefined);
+
 export const db = {
   get: (store, key) => single(store, 'readonly', (s) => wrap(s.get(key))),
   all: (store) => single(store, 'readonly', (s) => wrap(s.getAll())),
-  put: (store, val) => single(store, 'readwrite', (s) => wrap(s.put(val))),
-  del: (store, key) => single(store, 'readwrite', (s) => wrap(s.delete(key))),
-  clear: (store) => single(store, 'readwrite', (s) => wrap(s.clear())),
-  putMany: (store, vals) => single(store, 'readwrite', (s) => putAll(s, vals)),
+  put: (store, val) => single(store, 'readwrite', (s) => wrap(s.put(val))).then((r) => { notify({ store, key: keyOf(store, val), date: val && val.date, type: 'put' }); return r; }),
+  del: async (store, key) => {
+    const prev = store === 'food' ? await single(store, 'readonly', (s) => wrap(s.get(key))) : null;
+    const r = await single(store, 'readwrite', (s) => wrap(s.delete(key)));
+    notify({ store, key, date: prev && prev.date, type: 'delete' });
+    return r;
+  },
+  clear: (store) => single(store, 'readwrite', (s) => wrap(s.clear())).then((r) => { notify({ store, bulk: true, type: 'clear' }); return r; }),
+  putMany: (store, vals) => single(store, 'readwrite', (s) => putAll(s, vals)).then((r) => { notify({ store, bulk: true, type: 'put' }); return r; }),
   byIndex: (store, index, key) => single(store, 'readonly', (s) => wrap(s.index(index).getAll(key))),
   range: (store, lo, hi) => single(store, 'readonly', (s) => wrap(s.getAll(IDBKeyRange.bound(lo, hi)))),
   // Multi-store transaction: fn receives the IDBTransaction; use t.objectStore(name) and only await
   // IndexedDB requests inside it (awaiting anything else lets the transaction auto-commit early).
-  tx: (stores, mode, fn) => runTx(stores, mode, fn),
+  tx: (stores, mode, fn) => runTx(stores, mode, fn).then((r) => { if (mode === 'readwrite') for (const st of [].concat(stores)) notify({ store: st, bulk: true, type: 'tx' }); return r; }),
   putAll,
   wrap,
 };

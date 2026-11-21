@@ -13,12 +13,12 @@
 //     until it reloads.
 //
 // To ship a change: bump VERSION (any new string), commit, push.
-const VERSION = 'daybook-v2';
+const VERSION = 'daybook-v3';
 const SHELL = [
   './', './index.html', './manifest.webmanifest',
   './css/app.css', './css/shell.css', './css/food.css', './css/charts.css', './css/settings.css',
   './js/main.js', './js/util.js', './js/db.js', './js/metrics.js', './js/data.js', './js/today.js',
-  './js/food.js', './js/ai.js', './js/charts.js', './js/stats.js', './js/trends.js', './js/insights.js',
+  './js/food.js', './js/ai.js', './js/charts.js', './js/stats.js', './js/sync.js', './js/trends.js', './js/insights.js',
   './js/settings.js', './js/io.js', './js/health.js', './js/notes.js', './js/about.js',
   './icons/icon.svg', './icons/icon-192.png', './icons/icon-512.png',
   './icons/icon-192-maskable.png', './icons/icon-512-maskable.png',
