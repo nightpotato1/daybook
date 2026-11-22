@@ -104,11 +104,21 @@ function b64(bytes) {
 const b64text = (text) => b64(new TextEncoder().encode(text));
 
 async function gh(cfg, path, init = {}) {
-  const res = await fetch(`${API}/repos/${cfg.repo}/${path}`, {
-    ...init,
-    headers: { Authorization: `Bearer ${cfg.token}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', ...(init.headers || {}) },
-    signal: init.signal || AbortSignal.timeout(45000),
-  });
+  let res;
+  try {
+    res = await fetch(`${API}/repos/${cfg.repo}${path ? `/${path}` : ''}`, {
+      ...init,
+      headers: { Authorization: `Bearer ${cfg.token}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', ...(init.headers || {}) },
+      signal: init.signal || AbortSignal.timeout(45000),
+    });
+  } catch (e) {
+    // TypeError here means the request never reached GitHub: offline, a blocker, or a stale copy of
+    // the app whose security policy predates the backup feature.
+    if (e && e.name === 'TimeoutError') throw new Error('GitHub did not answer within 45 s; will retry');
+    throw new Error(navigator.onLine
+      ? 'Could not reach api.github.com. Close the app completely and reopen it (an old copy may still be running); if it keeps failing, check that https://api.github.com opens in Chrome.'
+      : 'Phone is offline; will retry when back online');
+  }
   if (res.status === 401) throw Object.assign(new Error('GitHub rejected the token (expired or revoked). Make a new one in Settings → Automatic backup.'), { fatal: true });
   if (res.status === 403 && /rate limit/i.test(await res.clone().text())) throw new Error('GitHub rate limit hit; will retry');
   return res;
