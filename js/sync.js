@@ -207,6 +207,21 @@ export async function push() {
 
 // ---- setup, restore ----
 
+// A 404 on the repository with a token that works means the token cannot see it. The fine-grained
+// token page defaults to "Public repositories", which never shows a private one.
+async function explain404(cfg) {
+  try {
+    const me = await fetch(`${API}/user`, { headers: { Authorization: `Bearer ${cfg.token}`, Accept: 'application/vnd.github+json' }, signal: AbortSignal.timeout(20000) });
+    if (me.ok) {
+      const login = (await me.json()).login;
+      const owner = cfg.repo.split('/')[0];
+      if (login && owner && login.toLowerCase() !== owner.toLowerCase()) return `The token belongs to @${login}, but the repository is under ${owner}. Make the token while signed in as ${owner}.`;
+      return `The token is valid (@${login}) but cannot see ${cfg.repo}. On github.com open the token → Repository access → choose "Only select repositories" and pick ${cfg.repo.split('/')[1]} (the default "Public repositories" cannot see a private repository) → Permissions → Contents: Read and write → Update.`;
+    }
+  } catch { /* fall through */ }
+  return `Repository ${cfg.repo} not found, or the token cannot see it. Check the spelling and the token's Repository access.`;
+}
+
 // Checks the token can write to the repo, then turns automatic backup on and pushes everything.
 export async function enableBackup(repo, token) {
   repo = (repo || '').trim().replace(/^https?:\/\/github\.com\//, '').replace(/\.git$/, '').replace(/\/+$/, '');
@@ -215,7 +230,7 @@ export async function enableBackup(repo, token) {
   if (!token) throw new Error('Paste the token first');
   const cfg = { repo, token, branch: 'main' };
   const res = await gh(cfg, '');
-  if (res.status === 404) throw new Error('Repository not found, or the token has no access to it');
+  if (res.status === 404) throw new Error(await explain404(cfg));
   if (!res.ok) throw new Error(`GitHub ${res.status} checking the repository`);
   const info = await res.json();
   if (!info.permissions || !info.permissions.push) throw new Error('The token can read but not write; it needs Contents: Read and write');
@@ -247,7 +262,7 @@ export async function disableBackup() {
 export async function inspectBackup(repo, token) {
   const cfg = { repo: repo.trim(), token: token.trim(), branch: 'main' };
   const info = await gh(cfg, '');
-  if (!info.ok) throw new Error(info.status === 404 ? 'Repository not found, or the token has no access to it' : `GitHub ${info.status}`);
+  if (!info.ok) throw new Error(info.status === 404 ? await explain404(cfg) : `GitHub ${info.status}`);
   cfg.branch = (await info.json()).default_branch || 'main';
   const tree = await gh(cfg, `git/trees/${encodeURIComponent(cfg.branch)}?recursive=1`);
   if (tree.status === 404 || tree.status === 409) return { cfg, days: [], photos: [], snapshot: false, meta: false }; // empty repo

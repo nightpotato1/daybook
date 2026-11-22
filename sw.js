@@ -13,7 +13,7 @@
 //     until it reloads.
 //
 // To ship a change: bump VERSION (any new string), commit, push.
-const VERSION = 'daybook-v4';
+const VERSION = 'daybook-v5';
 const SHELL = [
   './', './index.html', './manifest.webmanifest',
   './css/app.css', './css/shell.css', './css/food.css', './css/charts.css', './css/settings.css',
