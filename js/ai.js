@@ -104,15 +104,19 @@ export function aiReady(settings) {
 export async function estimateFood({ image, text, previous, corrections, signal }, settings) {
   const a = settings.ai || {};
   const prompt = userText(text, previous, corrections);
+  let r;
   if (a.provider === 'gemini') {
     if (!a.geminiKey) throw new Error('No Gemini key. Get a free one at aistudio.google.com/apikey and paste it in Settings → AI.');
-    return gemini(image, prompt, a, settings, signal);
-  }
-  if (a.provider === 'claude') {
+    r = await gemini(image, prompt, a, settings, signal);
+  } else if (a.provider === 'claude') {
     if (!a.claudeKey) throw new Error('No Claude key. Paste one in Settings → AI.');
-    return claude(image, prompt, a, signal);
-  }
-  throw new Error('AI is off. Add a free Gemini key in Settings → AI, or type the numbers yourself.');
+    r = await claude(image, prompt, a, signal);
+  } else throw new Error('AI is off. Add a free Gemini key in Settings → AI, or type the numbers yourself.');
+  // Only a fresh estimate from a photo gets the correction: corrections re-anchor on the previous numbers,
+  // and typed descriptions carry the user's own quantities.
+  const boost = Number(a.photoBoost ?? 30);
+  if (image && !(previous && previous.length) && boost > 0) applyPhotoBoost(r, boost);
+  return r;
 }
 
 function withTimeout(signal, ms = TIMEOUT_MS) {
@@ -164,14 +168,29 @@ const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 // Current free-tier text+vision models. Used when the chosen one is overloaded (503) or too slow:
 // fastest first, because by then the user has already waited.
 const GEMINI_FALLBACKS = ['gemini-3.5-flash-lite', 'gemini-3.6-flash', 'gemini-3.1-flash-lite', 'gemini-3.8-flash'];
-// Thinking depth: a food estimate needs none. 'minimal' is not accepted by 3.8-flash, so that one gets 'low'.
-function thinkingFor(model) {
-  if (/^gemini-3\.8/.test(model)) return 'low';
-  if (/^gemini-3/.test(model)) return 'minimal';
-  return null;
+// Thinking depth. The user chose deliberate over quick: 'thorough' (default) asks for full thinking and
+// waits; 'fast' asks for near-zero thinking ('minimal' is not accepted by 3.8-flash, so it gets 'low').
+const isThorough = (a) => (a.effort || 'thorough') !== 'fast';
+function thinkingFor(model, a) {
+  if (!/^gemini-3/.test(model)) return null;
+  if (isThorough(a)) return 'high';
+  return /^gemini-3\.8/.test(model) ? 'low' : 'minimal';
 }
-// A short text request should answer in seconds; a photo gets longer. Past that, a faster model is tried.
-const attemptTimeout = (image) => (image ? 40000 : 25000);
+// Thorough: up to 2 min for text, 2.5 min for a photo, and no silent downgrade on timeout.
+// Fast: a short text request should answer in seconds; past that a faster model is tried.
+const attemptTimeout = (image, a) => (isThorough(a) ? (image ? 150000 : 120000) : (image ? 40000 : 25000));
+
+// Photo estimates run low in every published test (about 250-345 kcal a meal, mostly fat), so a fresh
+// photo estimate is scaled up by settings.ai.photoBoost percent. Text descriptions are left alone.
+function applyPhotoBoost(r, pct) {
+  const f = 1 + pct / 100;
+  const up = (x) => Math.round(x * f * 10) / 10;
+  for (const i of r.items) { i.kcal = Math.round(i.kcal * f); i.protein = up(i.protein); i.carbs = up(i.carbs); i.fat = up(i.fat); }
+  r.kcal_low = Math.round(r.kcal_low * f); r.kcal_high = Math.round(r.kcal_high * f);
+  r.photoBoost = pct;
+  r.notice = `${r.notice ? `${r.notice} ` : ''}+${pct}% added because photo estimates run low (change in Settings → AI).`;
+  return r;
+}
 const sleep = (ms, signal) => new Promise((res, rej) => { const t = setTimeout(res, ms); signal?.addEventListener('abort', () => { clearTimeout(t); rej(new DOMException('Aborted', 'AbortError')); }, { once: true }); });
 
 // One request to one model. Throws an Error with .status set for HTTP failures.
@@ -180,7 +199,7 @@ async function geminiOnce(model, image, text, a, signal, noThinkingCfg = false) 
   if (image) parts.push({ inline_data: { mime_type: image.mime, data: image.base64 } });
   parts.push({ text });
   const generationConfig = { responseMimeType: 'application/json', responseSchema: geminiSchema(SCHEMA) };
-  const level = noThinkingCfg ? null : thinkingFor(model);
+  const level = noThinkingCfg ? null : thinkingFor(model, a);
   if (level) generationConfig.thinkingConfig = { thinkingLevel: level };
   let res;
   try {
@@ -192,7 +211,7 @@ async function geminiOnce(model, image, text, a, signal, noThinkingCfg = false) 
         contents: [{ role: 'user', parts }],
         generationConfig,
       }),
-      signal: withTimeout(signal, attemptTimeout(image)),
+      signal: withTimeout(signal, attemptTimeout(image, a)),
     });
   } catch (e) { throw fetchError(e); }
   const body = await res.json().catch(() => ({}));
@@ -240,13 +259,19 @@ async function gemini(image, text, a, settings, signal) {
       return r;
     }
     if (!e.timeout && !isOverloaded(e)) throw new Error(`Gemini refused the request (HTTP ${e.status}): ${e.message}`);
-    // Overloaded or too slow: retry once (after a pause if overloaded), then try the sibling models, fastest first.
+    const thorough = isThorough(a);
+    if (e.timeout && thorough) throw new Error(`${model} took longer than ${Math.round(attemptTimeout(image, a) / 60000)} min. Tap Estimate to retry, or switch Estimate style to Fast in Settings → AI.`);
+    // Overloaded (or, in fast mode, too slow): retry after a pause, then try the sibling models.
     if (!e.timeout) {
-      await sleep(1500, signal);
-      try { return await geminiOnce(model, image, text, a, signal); } catch (e2) { if (!e2.timeout && !isOverloaded(e2)) throw e2; }
+      for (const wait of (thorough ? [2000, 5000] : [1500])) {
+        await sleep(wait, signal);
+        try { return await geminiOnce(model, image, text, a, signal); } catch (e2) { if (!e2.timeout && !isOverloaded(e2)) throw e2; }
+      }
     }
     const tried = [model];
-    for (const alt of GEMINI_FALLBACKS.filter((m) => m !== model)) {
+    // thorough prefers the strongest siblings; fast prefers the quickest
+    const order = thorough ? ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite'] : GEMINI_FALLBACKS;
+    for (const alt of order.filter((m) => m !== model)) {
       try {
         const r = await geminiOnce(alt, image, text, a, signal);
         r.notice = `${model} was ${e.timeout ? 'too slow' : 'overloaded'}; this estimate came from ${alt}.`;

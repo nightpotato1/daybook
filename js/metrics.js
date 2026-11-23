@@ -85,7 +85,9 @@ export const DEFAULT_SETTINGS = {
   ai: {
     provider: 'gemini', // 'none' | 'gemini' | 'claude'; nothing is sent until a key is pasted
     geminiKey: '',
-    geminiModel: 'gemini-3.6-flash', // stable, accepts minimal thinking; 3.8 is slower and overloads more
+    geminiModel: 'gemini-3.8-flash',
+    effort: 'thorough', // 'thorough' = full thinking, long wait (user's choice); 'fast' = minimal thinking, quick fallback
+    photoBoost: 30, // percent added to fresh photo estimates (they run low); 0 turns it off
     claudeKey: '',
     claudeModel: 'claude-haiku-5-5',
     foodContext: '', // "my usual foods and measures", injected into the food prompt
@@ -128,9 +130,9 @@ export async function loadSettings() {
   const stored = await getMeta('settings', {});
   const s = deepMerge(structuredClone(DEFAULT_SETTINGS), stored);
   let changed = false;
-  if (['gemini-2.5-flash', 'gemini-2.5-flash-lite'].includes(s.ai.geminiModel)) { s.ai.geminiModel = 'gemini-3.6-flash'; changed = true; }
-  // 3.8-flash was the default for a while; move once to the faster stable model (the user can pick 3.8 again in Settings)
-  if (s.ai.geminiModel === 'gemini-3.8-flash' && !s.ai.moved36) { s.ai.geminiModel = 'gemini-3.6-flash'; s.ai.moved36 = true; changed = true; }
+  if (['gemini-2.5-flash', 'gemini-2.5-flash-lite'].includes(s.ai.geminiModel)) { s.ai.geminiModel = 'gemini-3.8-flash'; changed = true; }
+  // undo a short-lived move to 3.6-flash (2026-11-22): the user prefers the stronger, slower model
+  if (s.ai.moved36) { if (s.ai.geminiModel === 'gemini-3.6-flash') s.ai.geminiModel = 'gemini-3.8-flash'; delete s.ai.moved36; changed = true; }
   // The v1 default was Opus; only replace it when Claude was never set up (no key), so a real choice stays.
   if (s.ai.claudeModel === 'claude-opus-5-5' && !s.ai.claudeKey) { s.ai.claudeModel = 'claude-haiku-5-5'; changed = true; }
   if ('fitbit' in s) { delete s.fitbit; changed = true; }

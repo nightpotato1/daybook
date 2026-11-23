@@ -345,6 +345,11 @@ export async function renderSettings(root) {
       btn.disabled = false;
     } }, 'Load Gemini model list'),
     modelStatus,
+    h('label', {}, 'Estimate style', h('select', { onchange: (e) => { ai.effort = e.target.value; save(); } },
+      [['thorough', 'Thorough: full thinking, waits up to 2 min (default)'], ['fast', 'Fast: minimal thinking, 25 s, then a quicker model']].map(([v, l]) => h('option', { value: v, selected: (ai.effort || 'thorough') === v }, l)))),
+    h('label', {}, 'Photo correction, +% (added to fresh photo estimates; 0 = off; typed descriptions are never adjusted)',
+      h('input', { type: 'number', inputmode: 'numeric', min: 0, max: 100, step: 5, value: ai.photoBoost ?? 30, onchange: (e) => { ai.photoBoost = Math.max(0, Math.min(100, Number(e.target.value) || 0)); save(); } })),
+    h('p', { class: 'small muted' }, 'Published tests put photo estimates 250–345 kcal per meal under the truth, mostly hidden fat; the correction compensates on average and is named in the result note.'),
     h('label', {}, 'My usual foods and measures (sent with every estimate)',
       h('textarea', { rows: 3, placeholder: 'e.g. my dal is 1 cup cooked with 1 tsp ghee; chai = 150 ml whole milk, 1 tsp sugar',
         onchange: (e) => { ai.foodContext = e.target.value.trim(); save(); } }, ai.foodContext || '')),
