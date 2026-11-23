@@ -115,15 +115,17 @@ export async function estimateFood({ image, text, previous, corrections, signal 
   throw new Error('AI is off. Add a free Gemini key in Settings → AI, or type the numbers yourself.');
 }
 
-function withTimeout(signal) {
-  const t = AbortSignal.timeout(TIMEOUT_MS);
+function withTimeout(signal, ms = TIMEOUT_MS) {
+  const t = AbortSignal.timeout(ms);
   if (!signal) return t;
   return typeof AbortSignal.any === 'function' ? AbortSignal.any([signal, t]) : t;
 }
 
 function fetchError(e) {
   if (e && (e.name === 'TimeoutError' || e.name === 'AbortError')) {
-    return new Error(e.name === 'TimeoutError' ? 'Timed out after 45 s. Check your signal and tap Estimate to retry.' : 'Cancelled.');
+    const err = new Error(e.name === 'TimeoutError' ? 'Timed out waiting for Gemini. Check your signal and tap Estimate to retry.' : 'Cancelled.');
+    err.timeout = e.name === 'TimeoutError';
+    return err;
   }
   if (e instanceof TypeError) return new Error('No connection. Try again when you are online.');
   return e;
@@ -159,15 +161,27 @@ export async function aiCallsToday() {
 
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 
-// Current free-tier text+vision models, best first. Used when the chosen one is overloaded (503).
-const GEMINI_FALLBACKS = ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite'];
+// Current free-tier text+vision models. Used when the chosen one is overloaded (503) or too slow:
+// fastest first, because by then the user has already waited.
+const GEMINI_FALLBACKS = ['gemini-3.5-flash-lite', 'gemini-3.6-flash', 'gemini-3.1-flash-lite', 'gemini-3.8-flash'];
+// Thinking depth: a food estimate needs none. 'minimal' is not accepted by 3.8-flash, so that one gets 'low'.
+function thinkingFor(model) {
+  if (/^gemini-3\.8/.test(model)) return 'low';
+  if (/^gemini-3/.test(model)) return 'minimal';
+  return null;
+}
+// A short text request should answer in seconds; a photo gets longer. Past that, a faster model is tried.
+const attemptTimeout = (image) => (image ? 40000 : 25000);
 const sleep = (ms, signal) => new Promise((res, rej) => { const t = setTimeout(res, ms); signal?.addEventListener('abort', () => { clearTimeout(t); rej(new DOMException('Aborted', 'AbortError')); }, { once: true }); });
 
 // One request to one model. Throws an Error with .status set for HTTP failures.
-async function geminiOnce(model, image, text, a, signal) {
+async function geminiOnce(model, image, text, a, signal, noThinkingCfg = false) {
   const parts = [];
   if (image) parts.push({ inline_data: { mime_type: image.mime, data: image.base64 } });
   parts.push({ text });
+  const generationConfig = { responseMimeType: 'application/json', responseSchema: geminiSchema(SCHEMA) };
+  const level = noThinkingCfg ? null : thinkingFor(model);
+  if (level) generationConfig.thinkingConfig = { thinkingLevel: level };
   let res;
   try {
     res = await fetch(`${GEMINI_BASE}/models/${encodeURIComponent(model)}:generateContent`, {
@@ -176,14 +190,16 @@ async function geminiOnce(model, image, text, a, signal) {
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: systemPrompt(a) }] },
         contents: [{ role: 'user', parts }],
-        generationConfig: { responseMimeType: 'application/json', responseSchema: geminiSchema(SCHEMA) },
+        generationConfig,
       }),
-      signal: withTimeout(signal),
+      signal: withTimeout(signal, attemptTimeout(image)),
     });
   } catch (e) { throw fetchError(e); }
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
     const msg = body.error?.message || res.statusText || '';
+    // If this API build rejects the thinking field, send the request once more without it.
+    if (res.status === 400 && level && /thinking/i.test(msg)) return geminiOnce(model, image, text, a, signal, true);
     const err = new Error(oneLine(msg));
     err.status = res.status;
     err.apiStatus = body.error?.status || '';
@@ -210,7 +226,7 @@ async function gemini(image, text, a, settings, signal) {
   try {
     return await geminiOnce(model, image, text, a, signal);
   } catch (e) {
-    if (e.status == null) throw e; // network, block, parse: nothing to retry
+    if (e.status == null && !e.timeout) throw e; // network, block, parse: nothing to retry
     if (e.status === 429) throw new Error('Free Gemini limit reached for today (resets midnight Pacific). Type the numbers or add a past food.');
     if (e.status === 400 && /api key|API_KEY/i.test(e.message + e.apiStatus)) throw new Error('Gemini key rejected. Check it in Settings → AI.');
     if (e.status === 401 || e.status === 403) throw new Error('Gemini key rejected or not allowed. Check it in Settings → AI.');
@@ -223,23 +239,25 @@ async function gemini(image, text, a, settings, signal) {
       r.notice = `Model ${model} is gone; switched to ${picked} (saved in Settings).`;
       return r;
     }
-    if (!isOverloaded(e)) throw new Error(`Gemini refused the request (HTTP ${e.status}): ${e.message}`);
-    // Overloaded: wait once and retry, then try the sibling models for this request only.
-    await sleep(1500, signal);
-    try { return await geminiOnce(model, image, text, a, signal); } catch (e2) { if (!isOverloaded(e2)) throw e2; }
+    if (!e.timeout && !isOverloaded(e)) throw new Error(`Gemini refused the request (HTTP ${e.status}): ${e.message}`);
+    // Overloaded or too slow: retry once (after a pause if overloaded), then try the sibling models, fastest first.
+    if (!e.timeout) {
+      await sleep(1500, signal);
+      try { return await geminiOnce(model, image, text, a, signal); } catch (e2) { if (!e2.timeout && !isOverloaded(e2)) throw e2; }
+    }
     const tried = [model];
     for (const alt of GEMINI_FALLBACKS.filter((m) => m !== model)) {
       try {
         const r = await geminiOnce(alt, image, text, a, signal);
-        r.notice = `${model} was overloaded; this estimate came from ${alt}.`;
+        r.notice = `${model} was ${e.timeout ? 'too slow' : 'overloaded'}; this estimate came from ${alt}.`;
         return r;
       } catch (e3) {
         tried.push(alt);
         if (e3.status === 429) break; // quota, no point continuing
-        if (e3.status == null && !/HTTP/.test(e3.message)) throw e3;
+        if (e3.status == null && !e3.timeout) throw e3; // offline / cancelled
       }
     }
-    throw new Error(`Gemini is overloaded right now (HTTP ${e.status}); tried ${tried.join(', ')}. Try again in a minute, or type the numbers.`);
+    throw new Error(`Gemini is ${e.timeout ? 'answering too slowly' : `overloaded (HTTP ${e.status})`} right now; tried ${tried.join(', ')}. Try again in a minute, or type the numbers.`);
   }
 }
 
