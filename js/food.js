@@ -337,10 +337,16 @@ async function editor(root, date, entry, mode, settings) {
   }
 
   // Yes/No answers are appended to the correction text; the user sends them with Re-estimate.
+  // One question from the model with its own answer chips, plus "Other…" for an answer in your own words.
+  // Tapping writes "question: answer" into the correction box; Re-estimate sends it.
   function questionRow(q) {
-    const row = h('div', { class: 'fd-q' }, h('span', {}, q));
-    const answer = (a) => { describe.value = (describe.value.trim() ? describe.value.trim() + '\n' : '') + `${a}: ${q}`; row.remove(); };
-    row.append(h('button', { class: 'fd-chip', type: 'button', onclick: () => answer('Yes') }, 'Yes'), h('button', { class: 'fd-chip', type: 'button', onclick: () => answer('No') }, 'No'));
+    const text = typeof q === 'string' ? q : q.question;
+    const options = typeof q === 'string' ? ['Yes', 'No'] : q.options;
+    const row = h('div', { class: 'fd-q' }, h('span', {}, text));
+    const put = (a) => { describe.value = (describe.value.trim() ? describe.value.trim() + '\n' : '') + `${text} ${a}`; };
+    const answer = (a) => { put(a); row.remove(); };
+    row.append(...options.map((o) => h('button', { class: 'fd-chip', type: 'button', onclick: () => answer(o) }, o)),
+      h('button', { class: 'fd-chip', type: 'button', onclick: () => { put(''); row.remove(); describe.focus(); } }, 'Other…'));
     return row;
   }
 

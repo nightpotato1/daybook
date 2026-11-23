@@ -1,7 +1,7 @@
 // Food estimation from a photo and/or a text description, called straight from the phone with plain fetch.
 // Providers: Google Gemini (free key, default) or Anthropic Claude (paid key). No SDK, no third-party code.
 // Both return {meal, items:[{name, amount, grams, kcal, protein, carbs, fat}], notes, kcal_low, kcal_high,
-// assumed:[{name, kcal}], questions:[string]}. Every error thrown is a one-line message for the user.
+// assumed:[{name, kcal}], questions:[{question, options[]}]}. Every error thrown is a one-line message for the user.
 import { getMeta, setMeta } from './db.js';
 import { saveSettings } from './metrics.js';
 
@@ -18,8 +18,10 @@ Give a short meal name. "notes" is one sentence on the biggest uncertainty (or e
 "kcal_low" and "kcal_high" are a plausible range for the whole meal's calories (the items' total
 should sit inside it). "assumed" lists hidden ingredients you added or deliberately left out
 (for example cooking oil, butter on toast, sugar in tea) with the kcal you gave each, empty if none.
-"questions" is at most 2 short yes/no questions whose answers would change the estimate most,
-empty if nothing matters.
+"questions" is at most 2 short questions whose answers would change the estimate most, empty if
+nothing matters. Each has "question" and 2-4 short "options" that are the actual possible answers
+(for example "Tuna packed in?" with ["oil", "water"], or "Pie size?" with ["slice", "half", "whole"]);
+never offer yes/no for a question that is not yes/no.
 If a previous estimate and corrections are given, the previous list is the current truth (the user
 may have edited it). Apply the corrections, newest last, and return the FULL corrected item list.
 Keep every item the corrections do not mention identical (same name, amount, grams and numbers).`;
@@ -57,7 +59,15 @@ const SCHEMA = {
         additionalProperties: false,
       },
     },
-    questions: { type: 'array', items: { type: 'string' } },
+    questions: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: { question: { type: 'string' }, options: { type: 'array', items: { type: 'string' } } },
+        required: ['question', 'options'],
+        additionalProperties: false,
+      },
+    },
   },
   required: ['meal', 'items', 'notes', 'kcal_low', 'kcal_high', 'assumed', 'questions'],
   additionalProperties: false,
@@ -398,7 +408,13 @@ function normalise(r, provider, model) {
     items,
     kcal_low: lo, kcal_high: hi,
     assumed: (Array.isArray(r.assumed) ? r.assumed : []).map((x) => ({ name: String(x?.name || '').trim(), kcal: Math.round(num(x?.kcal)) })).filter((x) => x.name),
-    questions: (Array.isArray(r.questions) ? r.questions : []).map((q) => String(q || '').trim()).filter(Boolean).slice(0, 2),
+    // {question, options[]}; a bare string (older shape) becomes a yes/no question
+    questions: (Array.isArray(r.questions) ? r.questions : []).map((q) => {
+      if (typeof q === 'string') return { question: q.trim(), options: ['Yes', 'No'] };
+      const question = String(q?.question || '').trim();
+      const options = (Array.isArray(q?.options) ? q.options : []).map((o) => String(o || '').trim()).filter(Boolean).slice(0, 4);
+      return { question, options: options.length >= 2 ? options : ['Yes', 'No'] };
+    }).filter((q) => q.question).slice(0, 2),
   };
 }
 
