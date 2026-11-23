@@ -159,13 +159,18 @@ export async function aiCallsToday() {
 
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 
-async function gemini(image, text, a, settings, signal, retried = false) {
+// Current free-tier text+vision models, best first. Used when the chosen one is overloaded (503).
+const GEMINI_FALLBACKS = ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite'];
+const sleep = (ms, signal) => new Promise((res, rej) => { const t = setTimeout(res, ms); signal?.addEventListener('abort', () => { clearTimeout(t); rej(new DOMException('Aborted', 'AbortError')); }, { once: true }); });
+
+// One request to one model. Throws an Error with .status set for HTTP failures.
+async function geminiOnce(model, image, text, a, signal) {
   const parts = [];
   if (image) parts.push({ inline_data: { mime_type: image.mime, data: image.base64 } });
   parts.push({ text });
   let res;
   try {
-    res = await fetch(`${GEMINI_BASE}/models/${encodeURIComponent(a.geminiModel)}:generateContent`, {
+    res = await fetch(`${GEMINI_BASE}/models/${encodeURIComponent(model)}:generateContent`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': a.geminiKey },
       body: JSON.stringify({
@@ -177,29 +182,14 @@ async function gemini(image, text, a, settings, signal, retried = false) {
     });
   } catch (e) { throw fetchError(e); }
   const body = await res.json().catch(() => ({}));
-  if (res.ok) await countCall(); // only answered requests use quota
   if (!res.ok) {
     const msg = body.error?.message || res.statusText || '';
-    const status = body.error?.status || '';
-    if (res.status === 429) throw new Error('Free Gemini limit reached for today (resets midnight Pacific). Type the numbers or add a past food.');
-    // a retired model id answers 404 (or 400 naming the model); other 400s must not change the setting
-    if (res.status === 404 || (res.status === 400 && /model/i.test(msg))) {
-      if (retried) throw new Error(`Model ${a.geminiModel} is not available. Pick another in Settings → AI.`);
-      const picked = await pickGeminiModel(a.geminiKey).catch(() => null);
-      if (!picked) throw new Error(`Model ${a.geminiModel} was retired and no replacement was found. Pick a model in Settings → AI.`);
-      const old = a.geminiModel;
-      a.geminiModel = picked;
-      settings.ai = a;
-      await saveSettings(settings);
-      const r = await gemini(image, text, a, settings, signal, true);
-      r.notice = `Model ${old} is gone; switched to ${picked} (saved in Settings).`;
-      return r;
-    }
-    if (res.status === 400 && /api key|API_KEY/i.test(msg + status)) throw new Error('Gemini key rejected. Check it in Settings → AI.');
-    if (res.status === 401 || res.status === 403) throw new Error('Gemini key rejected or not allowed. Check it in Settings → AI.');
-    if (res.status >= 500) throw new Error(`Gemini is having trouble (HTTP ${res.status}). Try again in a minute.`);
-    throw new Error(`Gemini refused the request (HTTP ${res.status}): ${oneLine(msg)}`);
+    const err = new Error(oneLine(msg));
+    err.status = res.status;
+    err.apiStatus = body.error?.status || '';
+    throw err;
   }
+  await countCall(); // only answered requests use quota
   const block = body.promptFeedback?.blockReason;
   if (block) throw new Error(`Gemini blocked this photo (${block}). Try a clearer photo or describe the food instead.`);
   const cand = body.candidates?.[0];
@@ -210,7 +200,47 @@ async function gemini(image, text, a, settings, signal, retried = false) {
   }
   // thinking models may return reasoning parts flagged thought:true before the answer
   const txt = (cand?.content?.parts || []).filter((p) => !p.thought).map((p) => p.text || '').join('');
-  return normalise(parseJSON(txt), 'gemini', a.geminiModel);
+  return normalise(parseJSON(txt), 'gemini', model);
+}
+
+const isOverloaded = (e) => e && (e.status === 503 || e.status === 500 || e.status === 504 || /overloaded|UNAVAILABLE|RESOURCE_EXHAUSTED/i.test(`${e.message} ${e.apiStatus}`) && e.status !== 429);
+
+async function gemini(image, text, a, settings, signal) {
+  let model = a.geminiModel;
+  try {
+    return await geminiOnce(model, image, text, a, signal);
+  } catch (e) {
+    if (e.status == null) throw e; // network, block, parse: nothing to retry
+    if (e.status === 429) throw new Error('Free Gemini limit reached for today (resets midnight Pacific). Type the numbers or add a past food.');
+    if (e.status === 400 && /api key|API_KEY/i.test(e.message + e.apiStatus)) throw new Error('Gemini key rejected. Check it in Settings → AI.');
+    if (e.status === 401 || e.status === 403) throw new Error('Gemini key rejected or not allowed. Check it in Settings → AI.');
+    // a retired model id answers 404 (or 400 naming the model); other 400s must not change the setting
+    if (e.status === 404 || (e.status === 400 && /model/i.test(e.message))) {
+      const picked = await pickGeminiModel(a.geminiKey).catch(() => null);
+      if (!picked || picked === model) throw new Error(`Model ${model} is not available. Pick another in Settings → AI.`);
+      a.geminiModel = picked; settings.ai = a; await saveSettings(settings);
+      const r = await geminiOnce(picked, image, text, a, signal);
+      r.notice = `Model ${model} is gone; switched to ${picked} (saved in Settings).`;
+      return r;
+    }
+    if (!isOverloaded(e)) throw new Error(`Gemini refused the request (HTTP ${e.status}): ${e.message}`);
+    // Overloaded: wait once and retry, then try the sibling models for this request only.
+    await sleep(1500, signal);
+    try { return await geminiOnce(model, image, text, a, signal); } catch (e2) { if (!isOverloaded(e2)) throw e2; }
+    const tried = [model];
+    for (const alt of GEMINI_FALLBACKS.filter((m) => m !== model)) {
+      try {
+        const r = await geminiOnce(alt, image, text, a, signal);
+        r.notice = `${model} was overloaded; this estimate came from ${alt}.`;
+        return r;
+      } catch (e3) {
+        tried.push(alt);
+        if (e3.status === 429) break; // quota, no point continuing
+        if (e3.status == null && !/HTTP/.test(e3.message)) throw e3;
+      }
+    }
+    throw new Error(`Gemini is overloaded right now (HTTP ${e.status}); tried ${tried.join(', ')}. Try again in a minute, or type the numbers.`);
+  }
 }
 
 const FLASH_RE = /^gemini-(\d+(?:\.\d+)?)-flash(-lite)?$/;
