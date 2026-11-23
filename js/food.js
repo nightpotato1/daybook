@@ -2,7 +2,7 @@
 // barcode lookup and the AI estimate + correction loop. Styles live in css/food.css (fd- prefix).
 import { h, prettyDate, fmtNum, uid, toast, prepareImage, confirmDialog, modal, logicalToday, clockToMins, parseYmd, ymd } from './util.js';
 import { db, getMeta, setMeta } from './db.js';
-import { loadSettings } from './metrics.js';
+import { loadSettings, saveSettings } from './metrics.js';
 import { foodTotals } from './data.js';
 import { estimateFood, aiReady, aiCallsToday, GEMINI_DAILY_LIMIT } from './ai.js';
 
@@ -245,10 +245,24 @@ async function editor(root, date, entry, mode, settings) {
 
   const describe = h('textarea', { rows: 2, placeholder: 'Describe it, or correct the estimate: "2 eggs not 3, cooked in butter, big mug of chai with sugar"' });
 
+  // No key yet: put the key field right here so the first estimate is one step away.
   function setupMsg() {
-    return h('span', {}, 'Photo estimates are free with a Gemini key: ',
-      h('a', { href: 'https://aistudio.google.com/apikey', target: '_blank', rel: 'noopener' }, 'get one at aistudio.google.com/apikey'),
-      ', paste it in ', h('a', { href: '#/settings' }, 'Settings → AI'), '. Or type the numbers yourself.');
+    const keyIn = h('input', { type: 'password', placeholder: 'paste the key (starts with AIza)', autocomplete: 'off', class: 'grow' });
+    const saveBtn = h('button', { class: 'btn primary', type: 'button', onclick: async () => {
+      const k = keyIn.value.trim();
+      if (!k) { toast('Paste the key first'); keyIn.focus(); return; }
+      settings.ai.geminiKey = k;
+      if (settings.ai.provider === 'none') settings.ai.provider = 'gemini';
+      await saveSettings(settings);
+      toast('Key saved on this phone');
+      status.textContent = '';
+      runAI();
+    } }, 'Save & estimate');
+    return h('div', { class: 'fd-setup' },
+      h('div', {}, h('b', {}, 'One-time step: '), 'estimates (photo or text) need a free Gemini key. ',
+        h('a', { href: 'https://aistudio.google.com/apikey', target: '_blank', rel: 'noopener' }, 'Get it at aistudio.google.com/apikey'),
+        ' (Create API key → copy), then paste it here.'),
+      h('div', { class: 'row' }, keyIn, saveBtn));
   }
 
   async function refreshCount() {
@@ -268,7 +282,7 @@ async function editor(root, date, entry, mode, settings) {
 
   async function runAI() {
     if (inflight) { restartAI = true; inflight.abort(); return; } // a new photo: drop the old request, rerun below
-    if (!aiReady(settings)) { status.replaceChildren(setupMsg()); return; }
+    if (!aiReady(settings)) { status.replaceChildren(setupMsg()); status.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
     const text = describe.value.trim();
     const hasPrev = entry.items.some((i) => i.name);
     let img = image;
