@@ -6,7 +6,9 @@ import { getMeta, setMeta } from './db.js';
 import { saveSettings } from './metrics.js';
 
 const TIMEOUT_MS = 45000;
-export const GEMINI_DAILY_LIMIT = 20; // third-party figure for the free tier; AI Studio shows the real one
+// Google no longer publishes free-tier limits; they are per model, per minute AND per day, and AI Studio
+// shows the real numbers. The app counts its own calls and moves to the next model when one is used up.
+export const GEMINI_DAILY_LIMIT = null;
 
 const PROMPT = `You are a nutrition estimator. Identify every distinct food and drink in the input.
 For each item estimate the portion (a household amount like "1 cup" or "2 slices" plus grams),
@@ -171,6 +173,32 @@ export async function aiCallsToday() {
   return (await loadCalls()).n;
 }
 
+// Models that answered "quota exhausted for today" (per model); cleared when the Pacific day changes.
+let exhaustedCache = null;
+async function loadExhausted() {
+  if (!exhaustedCache) exhaustedCache = (await getMeta('aiExhausted', null)) || { day: pacificDay(), models: [] };
+  if (exhaustedCache.day !== pacificDay()) exhaustedCache = { day: pacificDay(), models: [] };
+  return exhaustedCache;
+}
+async function markExhausted(model) {
+  const x = await loadExhausted();
+  if (!x.models.includes(model)) x.models.push(model);
+  await setMeta('aiExhausted', x);
+}
+export async function exhaustedToday() { return (await loadExhausted()).models.slice(); }
+
+// 429 bodies say which quota tripped (quotaId ...PerMinute... / ...PerDay...) and how long to wait.
+function quotaInfo(e) {
+  const blob = JSON.stringify(e.details || '') + ' ' + (e.message || '');
+  const perDay = /PerDay|per day|daily/i.test(blob);
+  const perMinute = /PerMinute|per minute/i.test(blob);
+  let waitMs = 0;
+  const m = blob.match(/retryDelay[^0-9]*(\d+(?:\.\d+)?)s/i) || blob.match(/retry in (\d+(?:\.\d+)?)s/i);
+  if (m) waitMs = Math.ceil(parseFloat(m[1]) * 1000);
+  if (!waitMs && e.retryAfter) waitMs = Math.ceil(parseFloat(e.retryAfter) * 1000) || 0;
+  return { perDay: perDay && !perMinute, perMinute: perMinute || (!perDay && waitMs > 0 && waitMs <= 90000), waitMs };
+}
+
 // ---------- Gemini ----------
 
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
@@ -232,6 +260,8 @@ async function geminiOnce(model, image, text, a, signal, noThinkingCfg = false) 
     const err = new Error(oneLine(msg));
     err.status = res.status;
     err.apiStatus = body.error?.status || '';
+    err.details = body.error?.details || null;
+    err.retryAfter = res.headers.get('retry-after');
     throw err;
   }
   await countCall(); // only answered requests use quota
@@ -251,49 +281,70 @@ async function geminiOnce(model, image, text, a, signal, noThinkingCfg = false) 
 const isOverloaded = (e) => e && (e.status === 503 || e.status === 500 || e.status === 504 || /overloaded|UNAVAILABLE|RESOURCE_EXHAUSTED/i.test(`${e.message} ${e.apiStatus}`) && e.status !== 429);
 
 async function gemini(image, text, a, settings, signal) {
-  let model = a.geminiModel;
-  try {
-    return await geminiOnce(model, image, text, a, signal);
-  } catch (e) {
+  const thorough = isThorough(a);
+  const order = thorough ? ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite'] : GEMINI_FALLBACKS;
+  const exhausted = (await loadExhausted()).models;
+  const chain = [a.geminiModel, ...order.filter((m) => m !== a.geminiModel)].filter((m) => !exhausted.includes(m));
+  if (!chain.length) throw new Error('Every free Gemini model is out of requests for today (they reset at midnight Pacific). Type the numbers, or add a Claude key in Settings → AI.');
+  const first = chain[0];
+  const reasons = []; // why each model in the chain was passed over, for the final message / notice
+  if (first !== a.geminiModel) reasons.push(`${a.geminiModel} is out of requests for today`);
+  for (let i = 0; i < chain.length; i++) {
+    const model = chain[i];
+    let e;
+    try {
+      const r = await geminiOnce(model, image, text, a, signal);
+      if (reasons.length) r.notice = `${reasons.join('; ')}; this estimate came from ${model}.`;
+      return r;
+    } catch (err) { e = err; }
     if (e.status == null && !e.timeout) throw e; // network, block, parse: nothing to retry
-    if (e.status === 429) throw new Error('Free Gemini limit reached for today (resets midnight Pacific). Type the numbers or add a past food.');
     if (e.status === 400 && /api key|API_KEY/i.test(e.message + e.apiStatus)) throw new Error('Gemini key rejected. Check it in Settings → AI.');
     if (e.status === 401 || e.status === 403) throw new Error('Gemini key rejected or not allowed. Check it in Settings → AI.');
+    if (e.status === 429) {
+      const q = quotaInfo(e);
+      if (q.perMinute && !q.perDay) {
+        // Too many in one minute: wait what Google asks (at most 70 s) and try the same model once more.
+        const wait = Math.min(Math.max(q.waitMs || 20000, 3000), 70000);
+        await sleep(wait, signal);
+        try {
+          const r = await geminiOnce(model, image, text, a, signal);
+          if (reasons.length) r.notice = `${reasons.join('; ')}; this estimate came from ${model}.`;
+          return r;
+        } catch (e2) {
+          if (e2.status !== 429) { e = e2; if (e.status == null && !e.timeout) throw e; }
+        }
+        reasons.push(`${model} is rate-limited right now`);
+      } else {
+        await markExhausted(model);
+        reasons.push(`${model} is out of requests for today`);
+      }
+      continue;
+    }
     // a retired model id answers 404 (or 400 naming the model); other 400s must not change the setting
     if (e.status === 404 || (e.status === 400 && /model/i.test(e.message))) {
-      const picked = await pickGeminiModel(a.geminiKey).catch(() => null);
-      if (!picked || picked === model) throw new Error(`Model ${model} is not available. Pick another in Settings → AI.`);
-      a.geminiModel = picked; settings.ai = a; await saveSettings(settings);
-      const r = await geminiOnce(picked, image, text, a, signal);
-      r.notice = `Model ${model} is gone; switched to ${picked} (saved in Settings).`;
-      return r;
-    }
-    if (!e.timeout && !isOverloaded(e)) throw new Error(`Gemini refused the request (HTTP ${e.status}): ${e.message}`);
-    const thorough = isThorough(a);
-    if (e.timeout && thorough) throw new Error(`${model} took longer than ${Math.round(attemptTimeout(image, a) / 60000)} min. Tap Estimate to retry, or switch Estimate style to Fast in Settings → AI.`);
-    // Overloaded (or, in fast mode, too slow): retry after a pause, then try the sibling models.
-    if (!e.timeout) {
-      for (const wait of (thorough ? [2000, 5000] : [1500])) {
-        await sleep(wait, signal);
-        try { return await geminiOnce(model, image, text, a, signal); } catch (e2) { if (!e2.timeout && !isOverloaded(e2)) throw e2; }
+      if (model === a.geminiModel) {
+        const picked = await pickGeminiModel(a.geminiKey).catch(() => null);
+        if (picked && picked !== model) { a.geminiModel = picked; settings.ai = a; await saveSettings(settings); }
       }
+      reasons.push(`${model} is not available`);
+      continue;
     }
-    const tried = [model];
-    // thorough prefers the strongest siblings; fast prefers the quickest
-    const order = thorough ? ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite'] : GEMINI_FALLBACKS;
-    for (const alt of order.filter((m) => m !== model)) {
-      try {
-        const r = await geminiOnce(alt, image, text, a, signal);
-        r.notice = `${model} was ${e.timeout ? 'too slow' : 'overloaded'}; this estimate came from ${alt}.`;
-        return r;
-      } catch (e3) {
-        tried.push(alt);
-        if (e3.status === 429) break; // quota, no point continuing
-        if (e3.status == null && !e3.timeout) throw e3; // offline / cancelled
-      }
+    if (e.timeout) {
+      if (thorough) throw new Error(`${model} took longer than ${Math.round(attemptTimeout(image, a) / 60000)} min. Tap Estimate to retry, or switch Estimate style to Fast in Settings → AI.`);
+      reasons.push(`${model} was too slow`);
+      continue;
     }
-    throw new Error(`Gemini is ${e.timeout ? 'answering too slowly' : `overloaded (HTTP ${e.status})`} right now; tried ${tried.join(', ')}. Try again in a minute, or type the numbers.`);
+    if (!isOverloaded(e)) throw new Error(`Gemini refused the request (HTTP ${e.status}): ${e.message}`);
+    // Overloaded: pause and retry this model (twice when thorough), then move down the chain.
+    let recovered = null;
+    for (const wait of (thorough ? [2000, 5000] : [1500])) {
+      await sleep(wait, signal);
+      try { recovered = await geminiOnce(model, image, text, a, signal); break; } catch (e2) { if (!e2.timeout && !isOverloaded(e2) && e2.status !== 429) throw e2; }
+    }
+    if (recovered) { if (reasons.length) recovered.notice = `${reasons.join('; ')}; this estimate came from ${model}.`; return recovered; }
+    reasons.push(`${model} was overloaded`);
   }
+  throw new Error(`No Gemini model could answer: ${reasons.join('; ')}. Try again in a minute, or type the numbers.`);
 }
 
 const FLASH_RE = /^gemini-(\d+(?:\.\d+)?)-flash(-lite)?$/;
@@ -424,7 +475,7 @@ export async function testAI(settings) {
   if (a.provider === 'gemini') {
     const names = await listGeminiModels(a.geminiKey);
     const n = await aiCallsToday();
-    if (names.includes(a.geminiModel)) return `Key works. ${a.geminiModel} is available. ${n}/${GEMINI_DAILY_LIMIT} estimates used today.`;
+    if (names.includes(a.geminiModel)) return `Key works. ${a.geminiModel} is available. ${n} estimates made today.`;
     const pick = pickFrom(names);
     return `Key works, but ${a.geminiModel} is not in your model list${pick ? ` (try ${pick})` : ''}. Pick one from "Load Gemini model list".`;
   }

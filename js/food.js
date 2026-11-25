@@ -4,7 +4,7 @@ import { h, prettyDate, fmtNum, uid, toast, prepareImage, confirmDialog, modal, 
 import { db, getMeta, setMeta } from './db.js';
 import { loadSettings, saveSettings } from './metrics.js';
 import { foodTotals } from './data.js';
-import { estimateFood, aiReady, aiCallsToday, GEMINI_DAILY_LIMIT } from './ai.js';
+import { estimateFood, aiReady, aiCallsToday, exhaustedToday } from './ai.js';
 
 const MACROS = ['kcal', 'protein', 'carbs', 'fat'];
 const r1 = (x) => Math.round(x * 10) / 10;
@@ -267,7 +267,11 @@ async function editor(root, date, entry, mode, settings) {
 
   async function refreshCount() {
     if (settings.ai?.provider !== 'gemini') { countLine.textContent = ''; return; }
-    try { countLine.textContent = `${await aiCallsToday()}/${GEMINI_DAILY_LIMIT} used today`; } catch { countLine.textContent = ''; }
+    try {
+      const n = await aiCallsToday();
+      const out = await exhaustedToday();
+      countLine.textContent = `${n} estimate${n === 1 ? '' : 's'} today${out.length ? ` · out for today: ${out.map((m) => m.replace('gemini-', '')).join(', ')}` : ''}`;
+    } catch { countLine.textContent = ''; }
   }
 
   async function storedImage() {

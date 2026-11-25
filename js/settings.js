@@ -23,7 +23,7 @@ const CLAUDE_MODELS = [
 ];
 const GOAL_TYPES = ['count', 'hours', 'minutes', 'money', 'bool', 'scale'];
 const STEPPER_TYPES = ['count', 'hours', 'minutes', 'money'];
-const GEMINI_LIMIT = AI.GEMINI_DAILY_LIMIT ?? 20;
+
 // Rarely touched sections start folded; the set survives repaints so a row just moved there stays visible.
 const FOLDED = new Set(['auto', 'off']);
 
@@ -309,7 +309,7 @@ export async function renderSettings(root) {
   const usage = h('small', { class: 'muted' });
   Promise.resolve().then(() => AI.aiCallsToday()).then((r) => {
     const n = typeof r === 'number' ? r : (r && typeof r === 'object' ? r.n : 0) || 0;
-    usage.textContent = `${n}/${GEMINI_LIMIT} used today`;
+    usage.textContent = `${n} estimate${n === 1 ? '' : 's'} today`;
   }).catch(() => { usage.textContent = ''; });
   const modelList = h('datalist', { id: 'st-gemini-models' });
   const modelStatus = h('small', { class: 'muted st-status-line' });
@@ -325,7 +325,7 @@ export async function renderSettings(root) {
       [['gemini', 'Google Gemini (free key)'], ['claude', 'Claude (paid key)'], ['none', 'Off: type the numbers yourself']].map(([v, l]) => h('option', { value: v, selected: ai.provider === v }, l)))),
     h('p', { class: 'small muted' }, 'Keys stay on this phone. Only the food photo and your food text are sent, only when you press Estimate. Free Gemini key: get one at ',
       h('a', { href: 'https://aistudio.google.com/apikey', target: '_blank', rel: 'noopener' }, 'aistudio.google.com/apikey'),
-      ` and paste it here; about ${GEMINI_LIMIT} estimates a day.`),
+      ' and paste it here. Google does not publish the free limits: they are per model, per minute and per day (AI Studio shows yours). The app waits out a per-minute limit and moves to the next model when one is used up for the day.'),
     h('label', {}, h('span', { class: 'st-between' }, 'Gemini API key', usage),
       h('input', { type: 'password', value: ai.geminiKey || '', autocomplete: 'off', onchange: (e) => { ai.geminiKey = e.target.value.trim(); save(); } })),
     h('label', {}, 'Gemini model', h('input', { type: 'text', value: ai.geminiModel || '', list: 'st-gemini-models', onchange: (e) => { ai.geminiModel = e.target.value.trim(); save(); } })),

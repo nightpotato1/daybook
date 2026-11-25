@@ -1,7 +1,7 @@
 // Insights: one primary analysis (what goes with the target, weekday-adjusted, all data, effect
 // sizes with confidence intervals, FDR-labelled "probable"), and an explicitly uncorrected
 // Explore mode for other targets, ranges, raw values and next-day comparisons.
-import { h, fmtNum, minsToClock } from './util.js';
+import { h, fmtNum, minsToClock, toast } from './util.js';
 import { loadMetrics, loadSettings, saveSettings, isChartable, activeMetrics } from './metrics.js';
 import { loadSeries } from './data.js';
 import { analyze, weekdayMeans } from './stats.js';
@@ -53,14 +53,22 @@ export async function renderInsights(root, routeTarget) {
   const series = await loadSeries(metrics);
   const rerender = () => renderInsights(root);
 
-  const goals = (settings.goalsText || '').trim();
   const parts = [h('h2', { class: 'page-title' }, 'Insights')];
-  if (goals) parts.push(h('section', { class: 'card ch-goals' }, h('h3', {}, 'Your goals'), h('p', { class: 'ch-pre' }, goals)));
+  // Free-text goals: a notepad only (nothing in the analysis reads it); editable here, collapsed, at the end.
+  const goalsCard = () => {
+    const ta = h('textarea', { rows: 7, placeholder: 'What you are tracking all this for.' }, settings.goalsText || '');
+    return h('details', { class: 'card ch-goals' },
+      h('summary', {}, h('span', {}, 'Your goals'), h('small', { class: 'muted' }, 'notes only')),
+      h('p', { class: 'small muted' }, 'Nothing in the analysis reads this; it is a place to keep and rewrite your goals. Numeric habit targets live on each field in Settings → What you track and show on Today under "This week".'),
+      ta,
+      h('button', { class: 'btn', onclick: async () => { settings.goalsText = ta.value.trim(); await saveSettings(settings); toast('Goals saved'); } }, 'Save'));
+  };
 
   const loggedTarget = series.filter((r) => r.v[primary.id] != null).length;
   if (loggedTarget < 14) {
     parts.push(h('section', { class: 'card' }, h('p', { class: 'empty' }, `Need at least 14 days with ${lower(primary)} logged (have ${loggedTarget}). Keep checking in; the analysis switches on by itself.`)));
-    root.replaceChildren(...parts);
+    parts.push(goalsCard());
+  root.replaceChildren(...parts);
     return;
   }
 
@@ -111,6 +119,7 @@ export async function renderInsights(root, routeTarget) {
     skippedList(ex.skipped)),
     exDetail);
 
+  parts.push(goalsCard());
   root.replaceChildren(...parts);
 }
 
